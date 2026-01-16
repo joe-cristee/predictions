@@ -1,0 +1,43 @@
+# Risk Configuration
+# Exposure limits and risk parameters
+
+# Position limits
+position_limits:
+  max_position_per_market: 500   # Dollars
+  max_position_per_event: 1000
+  max_position_per_league: 2000
+  max_total_exposure: 5000
+
+# Loss limits
+loss_limits:
+  max_daily_loss: 500
+  max_weekly_loss: 1000
+  max_drawdown: 0.10  # 10%
+
+# Order limits
+order_limits:
+  max_order_size: 200   # Contracts
+  min_order_size: 10
+  max_orders_per_minute: 10
+
+# Timing constraints
+timing_constraints:
+  min_time_to_kickoff: 300      # 5 minutes
+  min_time_to_resolution: 600   # 10 minutes
+
+# Correlation limits
+correlation:
+  max_correlated_exposure: 1500
+  correlation_threshold: 0.7
+
+# Kill switch settings
+kill_switch:
+  auto_halt_on_loss_limit: true
+  manual_approval_required: false
+
+# Risk flags that block execution
+blocking_flags:
+  - "low_liquidity"
+  - "wide_spread"
+  - "near_resolution"
+

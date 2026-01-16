@@ -1,0 +1,26 @@
+# Kalshi Sports Alpha - Dependencies
+
+# Core
+requests>=2.28.0
+pyyaml>=6.0
+
+# Data processing
+pandas>=2.0.0
+numpy>=1.24.0
+pyarrow>=12.0.0
+
+# Testing
+pytest>=7.0.0
+pytest-cov>=4.0.0
+
+# Development
+black>=23.0.0
+isort>=5.12.0
+mypy>=1.0.0
+
+# Optional: Dashboard
+# streamlit>=1.20.0
+
+# Optional: Notifications
+# slack-sdk>=3.20.0
+

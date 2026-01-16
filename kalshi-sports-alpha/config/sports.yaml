@@ -1,0 +1,72 @@
+# Sports Configuration
+# Enabled leagues and market types
+
+leagues:
+  NFL:
+    enabled: true
+    series_ticker: "NFL"
+    market_types:
+      - moneyline
+      - total
+      - props
+    min_liquidity: 100  # Minimum depth to consider
+    
+  NBA:
+    enabled: true
+    series_ticker: "NBA"
+    market_types:
+      - moneyline
+      - total
+      - props
+    min_liquidity: 100
+
+  MLB:
+    enabled: true
+    series_ticker: "MLB"
+    market_types:
+      - moneyline
+      - total
+    min_liquidity: 50
+
+  NHL:
+    enabled: false
+    series_ticker: "NHL"
+    market_types:
+      - moneyline
+    min_liquidity: 50
+
+  NCAAF:
+    enabled: true
+    series_ticker: "NCAAF"
+    market_types:
+      - moneyline
+    min_liquidity: 50
+
+  NCAAB:
+    enabled: true
+    series_ticker: "NCAAB"
+    market_types:
+      - moneyline
+    min_liquidity: 50
+
+# Market type definitions
+market_types:
+  moneyline:
+    description: "Team wins the game"
+    typical_spread: 0.03
+    
+  total:
+    description: "Over/under total points"
+    typical_spread: 0.04
+    
+  props:
+    description: "Player/team props"
+    typical_spread: 0.05
+    requires_validation: true
+
+# Timing filters
+timing:
+  min_time_to_kickoff: 300  # 5 minutes (seconds)
+  max_time_to_kickoff: 86400  # 24 hours
+  exclude_live_markets: true
+

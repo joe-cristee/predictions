@@ -1,0 +1,54 @@
+# Signal Configuration
+# Thresholds, weights, and parameters
+
+signals:
+  tail_informed_flow:
+    enabled: true
+    weight: 1.0
+    parameters:
+      clustering_threshold: 0.6
+      notional_threshold: 500
+      impact_threshold: 0.02
+      spread_threshold: 0.05
+
+  fade_overreaction:
+    enabled: true
+    weight: 0.8
+    parameters:
+      velocity_threshold: 0.5
+      volume_ratio_max: 1.5
+      overreaction_threshold: 0.5
+      min_time_to_kickoff: 1800
+
+  late_kickoff_vol:
+    enabled: true
+    weight: 0.7
+    parameters:
+      volatility_ratio_threshold: 1.5
+      max_time_to_kickoff: 600
+      min_imbalance: 0.3
+      liquidity_warning: 0.3
+
+  fragile_market:
+    enabled: true
+    weight: 0.6
+    parameters:
+      max_depth: 200
+      min_impact: 0.03
+      max_time_to_resolution: 7200
+      min_edge: 0.02
+
+# Aggregation settings
+aggregation:
+  method: "weighted_linear"  # weighted_linear, logistic, max
+  min_signals: 1
+  require_agreement: false  # Require multiple signals to agree
+
+# Filtering
+filters:
+  min_composite_score: 0.3
+  min_confidence: 0.3
+  min_expected_value: 0.02
+  max_spread: 0.10
+  min_liquidity_score: 0.2
+

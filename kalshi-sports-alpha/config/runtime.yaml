@@ -1,0 +1,57 @@
+# Runtime Configuration
+# Operational parameters
+
+# API Configuration
+api:
+  base_url: "https://trading-api.kalshi.com/trade-api/v2"
+  rate_limit:
+    requests_per_second: 10
+    burst: 20
+  timeout: 30
+  retries: 3
+  retry_delay: 1.0
+
+# Polling settings
+polling:
+  enabled: true
+  interval_seconds: 5.0
+  include_orderbook: true
+  include_trades: true
+
+# Data storage
+storage:
+  raw_data_dir: "data/raw"
+  normalized_data_dir: "data/normalized"
+  features_dir: "data/features"
+  signals_dir: "data/signals"
+  format: "parquet"  # json, parquet
+
+# Logging
+logging:
+  level: "INFO"
+  file: "logs/kalshi_alpha.log"
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+  rotation: "daily"
+  retention_days: 30
+
+# Reporting
+reporting:
+  output_dir: "reports"
+  auto_generate: true
+  formats:
+    - markdown
+    - cli
+
+# Execution mode
+execution:
+  mode: "manual"  # manual, semi-auto, auto
+  require_confirmation: true
+  dry_run: true  # Log orders without executing
+
+# Feature flags
+features:
+  enable_backtest: true
+  enable_live_signals: true
+  enable_dashboard: false
+  enable_notifications: false
+
