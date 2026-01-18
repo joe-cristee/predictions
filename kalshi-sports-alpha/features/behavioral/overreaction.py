@@ -10,7 +10,64 @@ from features.registry import register_feature
     category="behavioral",
     description="Score indicating potential overreaction (0-1)"
 )
-def compute_overreaction_score(
+def compute_overreaction_score(snapshot: MarketSnapshot) -> float:
+    """
+    Compute overreaction score proxy from snapshot data.
+
+    Without historical price data, we use spread and depth as proxies.
+    Wide spread + thin depth can indicate overreaction/stress.
+
+    Returns:
+        Overreaction score in range [0, 1]
+    """
+    score = 0.0
+    
+    # Spread component - wider spreads can indicate uncertainty/overreaction
+    spread = snapshot.spread
+    if spread is not None:
+        # Wide spread (>5 cents) suggests market stress
+        spread_score = min(1.0, spread / 0.10)  # 10 cent spread = max score
+        score += spread_score * 0.5
+    
+    # Depth imbalance - extreme imbalance can indicate overreaction
+    imbalance = abs(snapshot.depth_imbalance)
+    imbalance_score = min(1.0, imbalance * 1.5)  # 0.67 imbalance = max
+    score += imbalance_score * 0.5
+    
+    return min(1.0, score)
+
+
+@register_feature(
+    name="mean_reversion_signal",
+    category="behavioral",
+    description="Mean reversion signal strength (-1 to 1)"
+)
+def compute_mean_reversion_signal(snapshot: MarketSnapshot) -> float:
+    """
+    Compute mean reversion signal proxy.
+
+    Without historical price data, use mid_price distance from 0.5.
+    Prices far from 0.5 have less room to move further.
+
+    Returns:
+        Signal strength in range [-1, 1]
+    """
+    if snapshot.mid_price is None:
+        return 0.0
+    
+    # Distance from neutral (0.5)
+    # Prices near extremes tend to mean-revert
+    deviation = snapshot.mid_price - 0.5
+    
+    # Signal is opposite to deviation (mean reversion)
+    # Large deviation = strong signal
+    signal = -deviation * 2  # Scale so 0.25 deviation = 0.5 signal
+    
+    return max(-1.0, min(1.0, signal))
+
+
+# Helper functions that require historical data (not registered as features)
+def compute_overreaction_score_from_history(
     price_change: float,
     volume_change: float,
     time_window_minutes: float = 30
@@ -44,18 +101,13 @@ def compute_overreaction_score(
     return normalized * time_factor
 
 
-@register_feature(
-    name="mean_reversion_signal",
-    category="behavioral",
-    description="Mean reversion signal strength (-1 to 1)"
-)
-def compute_mean_reversion_signal(
+def compute_mean_reversion_signal_from_history(
     current_price: float,
     moving_average: float,
     std_dev: float
 ) -> float:
     """
-    Compute mean reversion signal.
+    Compute mean reversion signal from historical data.
 
     Positive = price below MA (expect rise)
     Negative = price above MA (expect fall)

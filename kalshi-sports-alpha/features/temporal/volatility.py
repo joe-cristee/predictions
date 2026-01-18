@@ -11,7 +11,86 @@ from features.registry import register_feature
     category="temporal",
     description="Realized volatility from recent price changes"
 )
-def compute_realized_volatility(
+def compute_realized_volatility(snapshot: MarketSnapshot) -> float:
+    """
+    Compute realized volatility proxy from snapshot.
+
+    Without price history, use spread as volatility proxy.
+    Wider spreads often correlate with higher volatility.
+
+    Returns:
+        Volatility proxy (0-1 scale)
+    """
+    spread = snapshot.spread
+    if spread is None:
+        return 0.0
+    
+    # Use spread as volatility proxy
+    # Normalize: 1 cent spread = 0.1 vol, 10 cent spread = 1.0 vol
+    volatility = min(1.0, spread * 10)
+    return volatility
+
+
+@register_feature(
+    name="volatility_ratio",
+    category="temporal",
+    description="Recent vs historical volatility ratio"
+)
+def compute_volatility_ratio(snapshot: MarketSnapshot) -> float:
+    """
+    Compute volatility ratio proxy.
+
+    Without historical data, use volume burst as proxy.
+    High recent volume vs total suggests volatility spike.
+
+    Returns:
+        Volatility ratio proxy (1.0 = normal)
+    """
+    if snapshot.volume_1h == 0:
+        return 1.0
+    
+    # Compare 5-minute volume to 1-hour volume
+    # Expected: 5m is ~8% of 1h volume if uniform
+    expected_ratio = 5 / 60  # ~0.083
+    
+    if snapshot.volume_5m == 0:
+        return 1.0
+    
+    actual_ratio = snapshot.volume_5m / snapshot.volume_1h
+    
+    # Ratio of actual to expected gives volatility multiplier
+    vol_ratio = actual_ratio / expected_ratio
+    
+    return min(3.0, vol_ratio)  # Cap at 3x
+
+
+@register_feature(
+    name="price_velocity",
+    category="temporal",
+    description="Rate of price change (cents per minute)"
+)
+def compute_price_velocity(snapshot: MarketSnapshot) -> float:
+    """
+    Compute price velocity proxy.
+
+    Without price history, use depth imbalance as directional proxy.
+    Strong imbalance suggests price movement in that direction.
+
+    Returns:
+        Price velocity proxy (positive = upward pressure)
+    """
+    # Use depth imbalance as velocity proxy
+    # More bid depth suggests upward price pressure
+    imbalance = snapshot.depth_imbalance
+    
+    # Scale to reasonable velocity range (-1 to 1 cents/minute)
+    velocity = imbalance * 1.0
+    
+    return velocity
+
+
+# Helper functions that require price history (not registered as features)
+def compute_realized_volatility_from_history(
     price_history: list[float],
     annualize: bool = False
 ) -> Optional[float]:
@@ -50,50 +129,12 @@ def compute_realized_volatility(
     return volatility
 
 
-@register_feature(
-    name="volatility_ratio",
-    category="temporal",
-    description="Recent vs historical volatility ratio"
-)
-def compute_volatility_ratio(
-    recent_prices: list[float],
-    historical_prices: list[float]
-) -> Optional[float]:
-    """
-    Compute ratio of recent to historical volatility.
-
-    High ratio suggests volatility spike.
-
-    Args:
-        recent_prices: Recent price history (e.g., last hour)
-        historical_prices: Longer history (e.g., last day)
-
-    Returns:
-        Volatility ratio or None
-    """
-    recent_vol = compute_realized_volatility(recent_prices)
-    historical_vol = compute_realized_volatility(historical_prices)
-
-    if recent_vol is None or historical_vol is None:
-        return None
-
-    if historical_vol == 0:
-        return None
-
-    return recent_vol / historical_vol
-
-
-@register_feature(
-    name="price_velocity",
-    category="temporal",
-    description="Rate of price change (cents per minute)"
-)
-def compute_price_velocity(
+def compute_price_velocity_from_history(
     prices: list[float],
     timestamps: list[float],  # Unix timestamps
 ) -> Optional[float]:
     """
-    Compute price velocity (rate of change).
+    Compute price velocity (rate of change) from history.
 
     Args:
         prices: Price history

@@ -48,7 +48,32 @@ def compute_price_impact(
     category="microstructure",
     description="Kyle's lambda (price impact coefficient)"
 )
-def compute_kyle_lambda(
+def compute_kyle_lambda(snapshot: MarketSnapshot) -> float:
+    """
+    Estimate Kyle's lambda proxy from snapshot.
+
+    Without trade history, use spread/depth ratio as lambda proxy.
+    Higher lambda = higher price impact per unit volume.
+
+    Returns:
+        Lambda estimate (higher = more impact)
+    """
+    spread = snapshot.spread
+    depth = snapshot.total_bid_depth + snapshot.total_ask_depth
+    
+    if spread is None or depth == 0:
+        return 0.0
+    
+    # Lambda proxy: spread per unit depth
+    # Tight spread with deep book = low lambda
+    # Wide spread with thin book = high lambda
+    lambda_proxy = spread / (depth / 100 + 0.01)
+    
+    return min(1.0, lambda_proxy)
+
+
+# Helper function that requires trade history
+def compute_kyle_lambda_from_trades(
     trades: list[Trade],
     price_changes: list[float]
 ) -> Optional[float]:

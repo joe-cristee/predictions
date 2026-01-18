@@ -10,12 +10,79 @@ from features.registry import register_feature
     category="microstructure",
     description="Net buy-sell flow imbalance"
 )
-def compute_trade_flow_imbalance(
-    snapshot: MarketSnapshot,
+def compute_trade_flow_imbalance(snapshot: MarketSnapshot) -> float:
+    """
+    Compute trade flow imbalance proxy from order book depth.
+
+    Without trade history, we use depth imbalance as a proxy.
+    Positive = more bid depth (buying pressure)
+    Negative = more ask depth (selling pressure)
+
+    Returns:
+        Imbalance ratio in range [-1, 1]
+    """
+    # Use depth imbalance as proxy for flow imbalance
+    return snapshot.depth_imbalance
+
+
+@register_feature(
+    name="trade_clustering",
+    category="microstructure",
+    description="Measure of trade time clustering"
+)
+def compute_trade_clustering(snapshot: MarketSnapshot) -> float:
+    """
+    Compute trade clustering score proxy.
+
+    Without trade history, we estimate from volume patterns.
+    Higher volume in short windows suggests clustering.
+
+    Returns:
+        Clustering score (0-1, higher = more clustered)
+    """
+    # Without trade history, use volume concentration as proxy
+    # If 1-minute volume is high relative to 5-minute, trades are clustered
+    if snapshot.volume_5m == 0:
+        return 0.0
+    
+    # Ratio of 1m to 5m volume (expected ~0.2 if uniform)
+    volume_ratio = snapshot.volume_1m / snapshot.volume_5m
+    
+    # If ratio > 0.4, trades are more clustered in recent minute
+    clustering = min(1.0, volume_ratio * 2.5)
+    return clustering
+
+
+@register_feature(
+    name="large_trade_ratio",
+    category="microstructure",
+    description="Ratio of volume from large trades"
+)
+def compute_large_trade_ratio(snapshot: MarketSnapshot) -> float:
+    """
+    Compute large trade ratio proxy.
+
+    Without trade history, use last_trade_size if available.
+
+    Returns:
+        Ratio in range [0, 1]
+    """
+    if snapshot.last_trade_size is None:
+        return 0.0
+    
+    # If last trade was large (>50 contracts), signal high ratio
+    large_threshold = 50
+    if snapshot.last_trade_size >= large_threshold:
+        return min(1.0, snapshot.last_trade_size / 100)
+    return 0.0
+
+
+# Helper functions that require trade history (not registered as features)
+def compute_trade_flow_imbalance_from_trades(
     trades: Optional[list[Trade]] = None
 ) -> float:
     """
-    Compute trade flow imbalance from recent trades.
+    Compute trade flow imbalance from actual trade history.
 
     Positive = net buying pressure
     Negative = net selling pressure
@@ -36,17 +103,12 @@ def compute_trade_flow_imbalance(
     return (buy_volume - sell_volume) / total
 
 
-@register_feature(
-    name="trade_clustering",
-    category="microstructure",
-    description="Measure of trade time clustering"
-)
-def compute_trade_clustering(
+def compute_trade_clustering_from_trades(
     trades: list[Trade],
     window_seconds: float = 60.0
 ) -> float:
     """
-    Compute trade clustering score.
+    Compute trade clustering score from actual trade history.
 
     High clustering suggests informed trading.
 
@@ -84,39 +146,6 @@ def compute_trade_clustering(
     # Invert and normalize (high clustering = low CV = high score)
     clustering_score = max(0, 1 - cv)
     return min(1.0, clustering_score)
-
-
-@register_feature(
-    name="large_trade_ratio",
-    category="microstructure",
-    description="Ratio of volume from large trades"
-)
-def compute_large_trade_ratio(
-    trades: list[Trade],
-    size_threshold: int = 100
-) -> float:
-    """
-    Compute ratio of volume from large trades.
-
-    High ratio suggests institutional/informed activity.
-
-    Args:
-        trades: List of trades
-        size_threshold: Minimum size for "large" trade
-
-    Returns:
-        Ratio in range [0, 1]
-    """
-    if not trades:
-        return 0.0
-
-    total_volume = sum(t.count for t in trades)
-    large_volume = sum(t.count for t in trades if t.count >= size_threshold)
-
-    if total_volume == 0:
-        return 0.0
-
-    return large_volume / total_volume
 
 
 def compute_vwap(trades: list[Trade]) -> Optional[float]:

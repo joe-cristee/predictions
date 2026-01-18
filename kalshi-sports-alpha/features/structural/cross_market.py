@@ -10,7 +10,49 @@ from features.registry import register_feature
     category="structural",
     description="Divergence from related markets"
 )
-def compute_cross_market_divergence(
+def compute_cross_market_divergence(snapshot: MarketSnapshot) -> float:
+    """
+    Compute divergence proxy from bid-ask misalignment.
+
+    For a single market, divergence is measured as the gap between
+    YES bid and (1 - NO ask), which should be near zero in efficient markets.
+
+    Returns:
+        Divergence score (0 = perfectly aligned)
+    """
+    if snapshot.best_bid is None or snapshot.best_ask is None:
+        return 0.0
+    
+    # In an efficient market, mid should be close to last trade
+    if snapshot.last_trade_price is not None and snapshot.mid_price is not None:
+        divergence = abs(snapshot.mid_price - snapshot.last_trade_price)
+    else:
+        # Use spread as divergence proxy
+        divergence = snapshot.spread or 0.0
+    
+    return divergence
+
+
+@register_feature(
+    name="correlation_score",
+    category="structural",
+    description="Price correlation with related markets"
+)
+def compute_correlation_score(snapshot: MarketSnapshot) -> float:
+    """
+    Compute correlation proxy.
+
+    Without related market data, return neutral correlation.
+    
+    Returns:
+        Correlation coefficient placeholder (0 = no correlation data)
+    """
+    # Without related market history, return 0 (no correlation info)
+    return 0.0
+
+
+# Helper functions that require cross-market data (not registered as features)
+def compute_cross_market_divergence_from_prices(
     primary_price: float,
     related_prices: list[float],
     expected_relationship: str = "sum_to_one"
@@ -45,12 +87,7 @@ def compute_cross_market_divergence(
     return divergence
 
 
-@register_feature(
-    name="correlation_score",
-    category="structural",
-    description="Price correlation with related markets"
-)
-def compute_correlation_score(
+def compute_correlation_score_from_history(
     price_history: list[float],
     related_history: list[float]
 ) -> Optional[float]:

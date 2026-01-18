@@ -10,13 +10,67 @@ from features.registry import register_feature
     category="behavioral",
     description="FLB indicator (-1 to 1, positive = longshot overpriced)"
 )
-def compute_favorite_longshot_bias(
+def compute_favorite_longshot_bias(snapshot: MarketSnapshot) -> float:
+    """
+    Compute favorite-longshot bias indicator.
+
+    The FLB suggests:
+    - Longshots (low probability) are systematically overpriced
+    - Favorites (high probability) are underpriced
+
+    Uses mid_price as the Kalshi implied probability.
+
+    Returns:
+        FLB score: positive = potential fade longshot opportunity
+    """
+    kalshi_price = snapshot.mid_price
+    if kalshi_price is None:
+        return 0.0
+
+    # Without external reference, use empirical FLB curve
+    # Research shows ~2-5% bias at extremes
+    if kalshi_price < 0.20:
+        # Longshot: likely overpriced
+        expected_bias = 0.03 * (0.20 - kalshi_price) / 0.20
+    elif kalshi_price > 0.80:
+        # Favorite: likely underpriced
+        expected_bias = -0.03 * (kalshi_price - 0.80) / 0.20
+    else:
+        expected_bias = 0.0
+
+    return expected_bias
+
+
+@register_feature(
+    name="implied_edge",
+    category="behavioral",
+    description="Estimated edge from FLB (in cents)"
+)
+def compute_implied_edge(snapshot: MarketSnapshot) -> float:
+    """
+    Compute implied edge from pricing discrepancy.
+
+    Returns:
+        Edge in cents (positive = buy YES, negative = buy NO)
+    """
+    bias = compute_favorite_longshot_bias(snapshot)
+
+    # Edge = bias adjusted for typical vig
+    # Kalshi vig is ~1-2% per side
+    vig_adjustment = 0.02
+
+    edge = bias - vig_adjustment if bias > 0 else bias + vig_adjustment
+    return edge * 100  # Convert to cents
+
+
+# Helper functions for when external price data is available
+def compute_favorite_longshot_bias_with_external(
     kalshi_price: float,
     fair_prob: Optional[float] = None,
     sportsbook_odds: Optional[float] = None
 ) -> float:
     """
-    Compute favorite-longshot bias indicator.
+    Compute favorite-longshot bias with external reference.
 
     The FLB suggests:
     - Longshots (low probability) are systematically overpriced
@@ -38,46 +92,14 @@ def compute_favorite_longshot_bias(
         return kalshi_price - sportsbook_odds
 
     # Without external reference, use empirical FLB curve
-    # Research shows ~2-5% bias at extremes
     if kalshi_price < 0.20:
-        # Longshot: likely overpriced
         expected_bias = 0.03 * (0.20 - kalshi_price) / 0.20
     elif kalshi_price > 0.80:
-        # Favorite: likely underpriced
         expected_bias = -0.03 * (kalshi_price - 0.80) / 0.20
     else:
         expected_bias = 0.0
 
     return expected_bias
-
-
-@register_feature(
-    name="implied_edge",
-    category="behavioral",
-    description="Estimated edge from FLB (in cents)"
-)
-def compute_implied_edge(
-    kalshi_price: float,
-    external_price: Optional[float] = None
-) -> float:
-    """
-    Compute implied edge from pricing discrepancy.
-
-    Args:
-        kalshi_price: Kalshi implied probability
-        external_price: External reference probability
-
-    Returns:
-        Edge in cents (positive = buy YES, negative = buy NO)
-    """
-    bias = compute_favorite_longshot_bias(kalshi_price, external_price)
-
-    # Edge = bias adjusted for typical vig
-    # Kalshi vig is ~1-2% per side
-    vig_adjustment = 0.02
-
-    edge = bias - vig_adjustment if bias > 0 else bias + vig_adjustment
-    return edge * 100  # Convert to cents
 
 
 def identify_mispricing(

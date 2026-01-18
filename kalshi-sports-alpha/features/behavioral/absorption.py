@@ -22,36 +22,33 @@ class AbsorptionEvent:
     category="behavioral",
     description="Volume absorbed vs price impact ratio"
 )
-def compute_absorption_ratio(
-    volume: int,
-    price_change: float,
-    baseline_impact: Optional[float] = None
-) -> float:
+def compute_absorption_ratio(snapshot: MarketSnapshot) -> float:
     """
-    Compute absorption ratio - how much volume moved price.
+    Compute absorption ratio proxy from snapshot.
 
     High ratio = strong absorption (price held despite volume)
     Low ratio = weak absorption (price moved easily)
 
-    Args:
-        volume: Volume traded
-        price_change: Absolute price change
-        baseline_impact: Expected impact per contract
+    Uses depth and recent volume as proxy.
 
     Returns:
         Absorption ratio (higher = stronger absorption)
     """
-    if volume == 0:
-        return 0.0
-
-    if price_change == 0:
-        return float("inf")  # Perfect absorption
-
-    # Volume per cent of price move
-    ratio = volume / (abs(price_change) * 100 + 0.01)
-
-    # Normalize: 100 contracts per cent = ratio of 1
-    return min(10.0, ratio / 100)
+    # Use depth-to-volume ratio as absorption proxy
+    total_depth = snapshot.total_bid_depth + snapshot.total_ask_depth
+    recent_volume = snapshot.volume_5m
+    
+    if recent_volume == 0:
+        return 1.0  # No recent volume = stable
+    
+    if total_depth == 0:
+        return 0.0  # No depth = weak absorption
+    
+    # Higher depth relative to volume = better absorption
+    ratio = total_depth / recent_volume
+    
+    # Normalize: depth = volume means ratio of 1
+    return min(10.0, ratio)
 
 
 def detect_absorption_event(
@@ -107,44 +104,42 @@ def detect_absorption_event(
     category="behavioral",
     description="Estimated hidden liquidity (0-1)"
 )
-def compute_hidden_liquidity(
-    visible_depth: int,
-    recent_absorption: float,
-    trade_size_distribution: list[int]
-) -> float:
+def compute_hidden_liquidity(snapshot: MarketSnapshot) -> float:
     """
     Estimate hidden (iceberg) liquidity presence.
 
-    High score suggests significant hidden orders.
-
-    Args:
-        visible_depth: Visible order book depth
-        recent_absorption: Recent absorption ratio
-        trade_size_distribution: Recent trade sizes
+    Without detailed trade data, use volume vs depth ratio.
+    High volume relative to visible depth suggests hidden orders.
 
     Returns:
         Hidden liquidity score in range [0, 1]
     """
     score = 0.0
-
-    # High absorption suggests hidden orders
-    if recent_absorption > 2.0:
-        score += 0.4 * min(1.0, recent_absorption / 5)
-
-    # Consistent trade sizes suggest algorithmic iceberg
-    if trade_size_distribution:
-        mean_size = sum(trade_size_distribution) / len(trade_size_distribution)
-        variance = sum((s - mean_size) ** 2 for s in trade_size_distribution)
-        variance /= len(trade_size_distribution)
-
-        if variance < mean_size * 0.1:  # Low variance = consistent = iceberg
+    
+    visible_depth = snapshot.total_bid_depth + snapshot.total_ask_depth
+    recent_volume = snapshot.volume_1h
+    
+    if visible_depth == 0:
+        return 0.0
+    
+    if recent_volume == 0:
+        return 0.0
+    
+    # High volume relative to depth suggests hidden liquidity
+    volume_depth_ratio = recent_volume / visible_depth
+    
+    if volume_depth_ratio > 2.0:
+        score += 0.5 * min(1.0, volume_depth_ratio / 5)
+    
+    # Large last trade relative to visible depth suggests iceberg
+    if snapshot.last_trade_size is not None:
+        if snapshot.last_trade_size > visible_depth * 0.3:
             score += 0.3
-
-    # Large trades relative to visible depth
-    if trade_size_distribution and visible_depth > 0:
-        max_trade = max(trade_size_distribution)
-        if max_trade > visible_depth * 0.5:
-            score += 0.3
+    
+    # Tight spread with volume suggests hidden depth
+    spread = snapshot.spread
+    if spread is not None and spread < 0.03 and recent_volume > 100:
+        score += 0.2
 
     return min(1.0, score)
 

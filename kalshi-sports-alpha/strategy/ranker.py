@@ -106,9 +106,16 @@ class RecommendationRanker:
                 entry_price = market.get("no_ask", 0.5)
 
             # Estimate EV (simplified)
-            # In practice, would use more sophisticated model
-            edge = agg.aggregate_score * 0.05  # Scale to reasonable edge
-            ev = edge - 0.02  # Subtract vig estimate
+            # aggregate_score ranges 0-1, scale to edge estimate
+            # Higher score = higher confidence in direction = higher edge
+            base_edge = agg.aggregate_score * 0.15  # 15% edge at max score
+            
+            # Adjust for agreement ratio (more agreement = more confident)
+            agreement_factor = 0.5 + 0.5 * agg.agreement_ratio
+            
+            # Subtract estimated vig (1-2% typical)
+            vig = 0.015
+            ev = base_edge * agreement_factor - vig
 
             if ev < self.min_ev:
                 continue

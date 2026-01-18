@@ -7,6 +7,7 @@ from .kickoff_window import (
 from .volatility import (
     compute_realized_volatility,
     compute_volatility_ratio,
+    compute_price_velocity,
 )
 from .time_decay import (
     compute_time_decay,
@@ -18,6 +19,7 @@ __all__ = [
     "compute_time_urgency",
     "compute_realized_volatility",
     "compute_volatility_ratio",
+    "compute_price_velocity",
     "compute_time_decay",
     "compute_theta",
 ]

@@ -11,7 +11,31 @@ from features.registry import register_feature
     category="structural",
     description="Market rule complexity score (0-1)"
 )
-def compute_rule_complexity(rules: str) -> float:
+def compute_rule_complexity(snapshot: MarketSnapshot) -> float:
+    """
+    Compute complexity score proxy based on market type.
+
+    Without rule text, use market type as complexity proxy.
+    Props and totals tend to have more complex rules.
+
+    Returns:
+        Complexity score in range [0, 1]
+    """
+    # Use market type as complexity proxy
+    market_type = snapshot.market_type.lower()
+    
+    if market_type == "prop":
+        return 0.7  # Props often have complex settlement rules
+    elif market_type == "total":
+        return 0.4  # Totals have overtime considerations
+    elif market_type == "moneyline":
+        return 0.2  # Moneylines are straightforward
+    else:
+        return 0.3  # Default medium complexity
+
+
+# Helper function that requires actual rules text
+def compute_rule_complexity_from_text(rules: str) -> float:
     """
     Compute complexity score for market rules.
 
@@ -144,7 +168,34 @@ def identify_rule_edge_cases(rules: str) -> list[str]:
     category="structural",
     description="Risk of ambiguous settlement (0-1)"
 )
-def compute_settlement_ambiguity(rules: str) -> float:
+def compute_settlement_ambiguity(snapshot: MarketSnapshot) -> float:
+    """
+    Compute settlement ambiguity proxy.
+
+    Without rule text, use market type and time as proxies.
+    In-play markets and props have higher ambiguity risk.
+
+    Returns:
+        Ambiguity score in range [0, 1]
+    """
+    ambiguity = 0.0
+    
+    # Props have higher settlement ambiguity
+    if snapshot.market_type.lower() == "prop":
+        ambiguity += 0.3
+    
+    # Markets close to kickoff have more settlement edge cases
+    if snapshot.time_to_kickoff_seconds is not None:
+        if snapshot.time_to_kickoff_seconds < 600:  # 10 minutes
+            ambiguity += 0.2
+        elif snapshot.time_to_kickoff_seconds < 0:  # Live
+            ambiguity += 0.3
+    
+    return min(1.0, ambiguity)
+
+
+# Helper function that requires actual rules text
+def compute_settlement_ambiguity_from_text(rules: str) -> float:
     """
     Compute risk of ambiguous or disputed settlement.
 
