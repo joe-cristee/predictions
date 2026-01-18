@@ -47,11 +47,12 @@ class League:
 
 
 # Supported leagues with their configurations
+# Note: kalshi_series uses the actual Kalshi series ticker format (e.g., "KXNFLGAME")
 SUPPORTED_LEAGUES: dict[LeagueCode, League] = {
     LeagueCode.NFL: League(
         code=LeagueCode.NFL,
         name="National Football League",
-        kalshi_series="NFL",
+        kalshi_series="KXNFLGAME",
         typical_game_duration_minutes=180,
         has_overtime=True,
         has_live_markets=True,
@@ -61,7 +62,7 @@ SUPPORTED_LEAGUES: dict[LeagueCode, League] = {
     LeagueCode.NBA: League(
         code=LeagueCode.NBA,
         name="National Basketball Association",
-        kalshi_series="NBA",
+        kalshi_series="KXNBAGAME",
         typical_game_duration_minutes=150,
         has_overtime=True,
         has_live_markets=True,
@@ -71,7 +72,7 @@ SUPPORTED_LEAGUES: dict[LeagueCode, League] = {
     LeagueCode.MLB: League(
         code=LeagueCode.MLB,
         name="Major League Baseball",
-        kalshi_series="MLB",
+        kalshi_series="KXMLBGAME",
         typical_game_duration_minutes=180,
         has_overtime=True,  # Extra innings
         has_live_markets=True,
@@ -81,7 +82,7 @@ SUPPORTED_LEAGUES: dict[LeagueCode, League] = {
     LeagueCode.NHL: League(
         code=LeagueCode.NHL,
         name="National Hockey League",
-        kalshi_series="NHL",
+        kalshi_series="KXNHLGAME",
         typical_game_duration_minutes=150,
         has_overtime=True,
         has_live_markets=False,
@@ -91,7 +92,7 @@ SUPPORTED_LEAGUES: dict[LeagueCode, League] = {
     LeagueCode.NCAAF: League(
         code=LeagueCode.NCAAF,
         name="NCAA Football",
-        kalshi_series="NCAAF",
+        kalshi_series="KXNCAAFGAME",
         typical_game_duration_minutes=210,
         has_overtime=True,
         has_live_markets=False,
@@ -101,7 +102,7 @@ SUPPORTED_LEAGUES: dict[LeagueCode, League] = {
     LeagueCode.NCAAB: League(
         code=LeagueCode.NCAAB,
         name="NCAA Basketball",
-        kalshi_series="NCAAB",
+        kalshi_series="KXNCAABGAME",
         typical_game_duration_minutes=120,
         has_overtime=True,
         has_live_markets=False,
