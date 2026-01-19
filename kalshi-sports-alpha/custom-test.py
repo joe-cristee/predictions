@@ -8,7 +8,10 @@ from dotenv import load_dotenv
 from kalshi.api import KalshiClient
 from ingestion import MarketPoller
 from features import FeatureRegistry
+from features.microstructure.liquidity import compute_liquidity_score
 from signals import TailInformedFlowSignal, FadeOverreactionSignal
+from signals.late_kickoff_vol import LateKickoffVolSignal
+from signals.fragile_market import FragileMarketSignal
 from strategy import SignalAggregator, RecommendationRanker
 from reporting import CLIReporter
 
@@ -43,8 +46,21 @@ client = KalshiClient(
 # Initialize components
 poller = MarketPoller(client)
 registry = FeatureRegistry()
-generators = [TailInformedFlowSignal(), FadeOverreactionSignal()]
-aggregator = SignalAggregator()
+
+# Use all available signal generators
+generators = [
+    TailInformedFlowSignal(),
+    FadeOverreactionSignal(),
+    LateKickoffVolSignal(),
+    FragileMarketSignal(),
+]
+
+# Aggregator now requires min 2 signals with agreement by default
+aggregator = SignalAggregator(
+    min_signals=2,
+    require_agreement=True,
+    min_agreement_ratio=0.6,
+)
 ranker = RecommendationRanker()
 reporter = CLIReporter()
 
@@ -66,12 +82,19 @@ for snapshot in snapshots:
         if signal is not None:
             signals_by_market[snapshot.market_id].append(signal)
     
-    # Store market data for ranker
+    # Store market data for ranker (includes fields needed for EV calculation)
     market_data[snapshot.market_id] = {
         "event_id": snapshot.event_id,
         "league": snapshot.league,
+        "matchup": f"{snapshot.team_home} vs {snapshot.team_away}" if snapshot.team_home else "",
+        "title": snapshot.market_id,
         "yes_ask": snapshot.best_ask,
         "no_ask": 1 - snapshot.best_bid if snapshot.best_bid else None,
+        "spread": snapshot.spread,  # Needed for dynamic vig calculation
+        "liquidity_score": compute_liquidity_score(snapshot),  # Needed for sizing
+        "time_to_kickoff": snapshot.time_to_kickoff_seconds,
+        "time_to_resolution": snapshot.time_to_resolution_seconds,
+        "available_depth": snapshot.total_bid_depth + snapshot.total_ask_depth,
     }
 
 total_signals = sum(len(s) for s in signals_by_market.values())
