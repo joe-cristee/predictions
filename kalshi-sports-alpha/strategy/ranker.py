@@ -8,6 +8,56 @@ from .aggregator import AggregatedSignal
 
 
 @dataclass
+class CandidateOpportunity:
+    """
+    All evaluated opportunities, whether recommended or not.
+    
+    Used for the watchlist to show near-miss opportunities.
+    """
+    
+    market_id: str
+    event_id: str
+    direction: str  # "YES" or "NO"
+    entry_price: float
+    expected_value: float
+    confidence: float
+    signals: list[str]
+    rejection_reasons: list[str]  # Empty if recommended
+    rank_score: float  # For sorting watchlist
+    
+    # Display info
+    league: str = ""
+    matchup: str = ""
+    market_title: str = ""
+    
+    # Thresholds that were applied (for display)
+    ev_threshold: float = 0.0
+    confidence_threshold: float = 0.0
+    
+    @property
+    def is_recommended(self) -> bool:
+        """Returns True if this candidate passed all filters."""
+        return len(self.rejection_reasons) == 0
+    
+    def to_dict(self) -> dict:
+        """Convert to dictionary."""
+        return {
+            "market_id": self.market_id,
+            "event_id": self.event_id,
+            "direction": self.direction,
+            "entry_price": self.entry_price,
+            "expected_value": self.expected_value,
+            "confidence": self.confidence,
+            "signals": self.signals,
+            "rejection_reasons": self.rejection_reasons,
+            "rank_score": self.rank_score,
+            "league": self.league,
+            "matchup": self.matchup,
+            "is_recommended": self.is_recommended,
+        }
+
+
+@dataclass
 class Recommendation:
     """
     Final output delivered to the user.
@@ -194,6 +244,100 @@ class RecommendationRanker:
         recommendations.sort(key=lambda r: -r.rank_score)
 
         return recommendations[: self.max_recommendations]
+
+    def rank_all(
+        self,
+        aggregated_signals: list[AggregatedSignal],
+        market_data: dict[str, dict],
+    ) -> tuple[list[Recommendation], list[CandidateOpportunity]]:
+        """
+        Create and rank recommendations, returning both approved and near-miss candidates.
+
+        Args:
+            aggregated_signals: Aggregated signals by market
+            market_data: Market metadata (prices, liquidity, etc.)
+
+        Returns:
+            Tuple of (recommendations, watchlist_candidates)
+            - recommendations: Opportunities that passed all filters
+            - watchlist_candidates: All other opportunities, sorted by potential
+        """
+        recommendations = []
+        watchlist = []
+
+        for agg in aggregated_signals:
+            market = market_data.get(agg.market_id, {})
+
+            # Get entry price
+            if agg.direction == SignalDirection.YES:
+                entry_price = market.get("yes_ask", 0.5)
+            else:
+                entry_price = market.get("no_ask", 0.5)
+
+            # Calculate EV
+            ev = self._calculate_expected_value(agg, entry_price, market)
+
+            # Track rejection reasons
+            rejection_reasons = []
+            
+            if ev < self.min_ev:
+                rejection_reasons.append(f"EV below threshold ({ev*100:.1f}% < {self.min_ev*100:.1f}%)")
+
+            if agg.confidence < self.min_confidence:
+                rejection_reasons.append(f"Confidence below threshold ({agg.confidence:.0%} < {self.min_confidence:.0%})")
+
+            # Calculate rank score for ordering
+            temp_rec = Recommendation(
+                market_id=agg.market_id,
+                event_id=market.get("event_id", ""),
+                contract=agg.direction.value,
+                entry_price=entry_price,
+                max_size=self._calculate_max_size(agg, market),
+                expected_value=ev,
+                time_to_resolution=market.get("time_to_resolution"),
+                contributing_signals=[s.name for s in agg.contributing_signals],
+                risk_flags=self._identify_risks(agg, market),
+                league=market.get("league", ""),
+                matchup=market.get("matchup", ""),
+                market_title=market.get("title", ""),
+                confidence=agg.confidence,
+            )
+            rank_score = self._calculate_rank_score(temp_rec, market)
+
+            if not rejection_reasons:
+                # Passed all filters - add to recommendations
+                temp_rec.rank_score = rank_score
+                recommendations.append(temp_rec)
+            else:
+                # Create watchlist candidate
+                candidate = CandidateOpportunity(
+                    market_id=agg.market_id,
+                    event_id=market.get("event_id", ""),
+                    direction=agg.direction.value,
+                    entry_price=entry_price,
+                    expected_value=ev,
+                    confidence=agg.confidence,
+                    signals=[s.name for s in agg.contributing_signals],
+                    rejection_reasons=rejection_reasons,
+                    rank_score=rank_score,
+                    league=market.get("league", ""),
+                    matchup=market.get("matchup", ""),
+                    market_title=market.get("title", ""),
+                    ev_threshold=self.min_ev,
+                    confidence_threshold=self.min_confidence,
+                )
+                watchlist.append(candidate)
+
+        # Sort recommendations by rank score
+        recommendations.sort(key=lambda r: -r.rank_score)
+        
+        # Sort watchlist by rank score (best near-misses first)
+        watchlist.sort(key=lambda c: -c.rank_score)
+
+        return (
+            recommendations[: self.max_recommendations],
+            watchlist
+        )
 
     def _calculate_rank_score(
         self,

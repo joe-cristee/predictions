@@ -13,7 +13,7 @@ from signals import TailInformedFlowSignal, FadeOverreactionSignal
 from signals.late_kickoff_vol import LateKickoffVolSignal
 from signals.fragile_market import FragileMarketSignal
 from strategy import SignalAggregator, RecommendationRanker
-from reporting import CLIReporter
+from reporting import CLIReporter, MarkdownReporter, PipelineStatsCollector
 
 # Setup logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -46,6 +46,7 @@ client = KalshiClient(
 # Initialize components
 poller = MarketPoller(client)
 registry = FeatureRegistry()
+stats_collector = PipelineStatsCollector()
 
 # Use all available signal generators
 generators = [
@@ -64,11 +65,13 @@ aggregator = SignalAggregator(
 ranker = RecommendationRanker()
 reporter = CLIReporter()
 
-# Generate recommendations
+#%%
+# Stage 1: Poll markets
 snapshots = poller.poll_once()
+stats_collector.record_snapshots(snapshots)
 print(f"Polled {len(snapshots)} market snapshots")
 
-# Process each snapshot
+# Stage 2: Generate signals
 signals_by_market = defaultdict(list)
 market_data = {}
 
@@ -97,12 +100,47 @@ for snapshot in snapshots:
         "available_depth": snapshot.total_bid_depth + snapshot.total_ask_depth,
     }
 
+stats_collector.record_signals(dict(signals_by_market))
 total_signals = sum(len(s) for s in signals_by_market.values())
 print(f"Generated {total_signals} signals across {len(signals_by_market)} markets")
 
-# Aggregate and rank
+#%%
+# Stage 3: Aggregate signals
 aggregated = aggregator.aggregate_batch(dict(signals_by_market))
-recommendations = ranker.rank(aggregated, market_data)
+aggregation_dropoff = len(signals_by_market) - len(aggregated)
+stats_collector.record_aggregation(len(aggregated), aggregation_dropoff)
 
-print(f"Produced {len(recommendations)} recommendations")
+# Stage 4: Rank and filter
+recommendations, watchlist = ranker.rank_all(aggregated, market_data)
+
+# Count filtering reasons from watchlist
+filtered_by_ev = sum(1 for c in watchlist if any("EV" in r for r in c.rejection_reasons))
+filtered_by_conf = sum(1 for c in watchlist if any("Confidence" in r for r in c.rejection_reasons))
+stats_collector.record_filtering(len(recommendations), len(watchlist), filtered_by_ev, filtered_by_conf)
+
+# Finalize stats
+pipeline_stats = stats_collector.finalize()
+
+print(f"Produced {len(recommendations)} recommendations and {len(watchlist)} watchlist candidates")
+
+#%%
+# Display pipeline summary (shows funnel even when no recommendations)
+reporter.print_pipeline_summary(pipeline_stats)
+
+# Display markets summary
+reporter.print_markets_summary(pipeline_stats, max_display=10)
+
+# Display signals summary
+reporter.print_signals_summary(pipeline_stats, max_display=15)
+
+# Display recommendations
 reporter.print_recommendations(recommendations)
+
+# Display watchlist (top 5 near-miss opportunities)
+reporter.print_watchlist(watchlist, max_display=5)
+
+#%%
+# Optional: Save markdown report with watchlist
+# md_reporter = MarkdownReporter()
+# report_path = md_reporter.save_report(recommendations, watchlist=watchlist)
+# print(f"Saved report to: {report_path}")

@@ -20,8 +20,8 @@ black>=23.0.0
 isort>=5.12.0
 mypy>=1.0.0
 
-# Optional: Dashboard
-# streamlit>=1.20.0
+# Dashboard
+streamlit>=1.20.0
 
 # Optional: Notifications
 # slack-sdk>=3.20.0
