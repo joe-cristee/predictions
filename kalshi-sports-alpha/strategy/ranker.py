@@ -79,6 +79,61 @@ class RecommendationRanker:
         self.liquidity_weight = liquidity_weight
         self.timing_weight = timing_weight
 
+    def _calculate_expected_value(
+        self,
+        agg: AggregatedSignal,
+        entry_price: float,
+        market: dict
+    ) -> float:
+        """
+        Calculate expected value using dynamic vig and signal-derived edge.
+
+        EV = (estimated_win_prob * win_payout) - (estimated_loss_prob * loss_amount) - transaction_costs
+
+        For binary options:
+        - Win payout = 1 - entry_price (profit per contract)
+        - Loss amount = entry_price (cost per contract)
+
+        Args:
+            agg: Aggregated signal with score and confidence
+            entry_price: Price to enter the position
+            market: Market data including spread
+
+        Returns:
+            Expected value as a decimal (e.g., 0.05 = 5% EV)
+        """
+        # Dynamic vig calculation from spread
+        # Spread represents the round-trip cost (bid-ask difference)
+        spread = market.get("spread", 0.02)
+        vig = spread / 2  # Half spread is our entry cost
+
+        # Estimate our edge over the market
+        # Signal score (0-1) represents strength, agreement ratio boosts confidence
+        # Max edge we claim is 10% over market - being conservative
+        max_edge = 0.10
+        signal_edge = agg.aggregate_score * max_edge
+
+        # Agreement ratio scales our confidence in the edge
+        # Full agreement (1.0) = full edge, split signals = reduced edge
+        agreement_scaling = 0.5 + 0.5 * agg.agreement_ratio
+        estimated_edge = signal_edge * agreement_scaling
+
+        # Our estimated win probability = market implied prob + our edge
+        market_implied_prob = entry_price
+        estimated_win_prob = min(0.95, market_implied_prob + estimated_edge)
+
+        # Calculate EV
+        # EV = P(win) * profit_if_win - P(lose) * loss_if_lose - vig
+        win_profit = 1 - entry_price  # Payout is $1, we paid entry_price
+        loss_amount = entry_price  # We lose our stake
+
+        gross_ev = (estimated_win_prob * win_profit) - ((1 - estimated_win_prob) * loss_amount)
+
+        # Subtract transaction costs (vig)
+        net_ev = gross_ev - vig
+
+        return net_ev
+
     def rank(
         self,
         aggregated_signals: list[AggregatedSignal],
@@ -99,23 +154,14 @@ class RecommendationRanker:
         for agg in aggregated_signals:
             market = market_data.get(agg.market_id, {})
 
-            # Get entry price
+            # Get entry price and spread for vig calculation
             if agg.direction == SignalDirection.YES:
                 entry_price = market.get("yes_ask", 0.5)
             else:
                 entry_price = market.get("no_ask", 0.5)
 
-            # Estimate EV (simplified)
-            # aggregate_score ranges 0-1, scale to edge estimate
-            # Higher score = higher confidence in direction = higher edge
-            base_edge = agg.aggregate_score * 0.15  # 15% edge at max score
-            
-            # Adjust for agreement ratio (more agreement = more confident)
-            agreement_factor = 0.5 + 0.5 * agg.agreement_ratio
-            
-            # Subtract estimated vig (1-2% typical)
-            vig = 0.015
-            ev = base_edge * agreement_factor - vig
+            # Calculate EV using dynamic vig and signal-derived edge
+            ev = self._calculate_expected_value(agg, entry_price, market)
 
             if ev < self.min_ev:
                 continue

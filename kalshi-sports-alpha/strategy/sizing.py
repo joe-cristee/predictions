@@ -37,35 +37,45 @@ class PositionSizer:
     def calculate(
         self,
         signal_confidence: float,
-        expected_value: float,
+        entry_price: float,
         liquidity_score: float,
         time_to_resolution: Optional[int] = None,
         available_depth: Optional[int] = None,
+        bankroll: Optional[float] = None,
     ) -> int:
         """
-        Calculate position size.
+        Calculate position size using Kelly criterion.
 
         Args:
-            signal_confidence: Confidence in signal (0-1)
-            expected_value: Expected value as decimal (e.g., 0.05 = 5%)
+            signal_confidence: Confidence in signal (0-1), used as win probability estimate
+            entry_price: Entry price for the contract (0-1)
             liquidity_score: Market liquidity (0-1)
             time_to_resolution: Seconds until resolution
             available_depth: Available order book depth
+            bankroll: Total bankroll for Kelly calculation
 
         Returns:
             Suggested position size in dollars
         """
-        # Start with base size
-        size = self.params.base_size
+        # Estimate win probability from signal confidence and entry price
+        # If signal confidence is high and price is low, we have edge
+        # Use confidence to adjust our probability estimate above market price
+        # win_prob = entry_price + (confidence * edge_scaling)
+        # where edge_scaling represents max additional edge we believe we have
+        max_edge = 0.10  # Maximum 10% edge over market
+        estimated_win_prob = entry_price + (signal_confidence * max_edge)
+        estimated_win_prob = min(0.95, max(0.05, estimated_win_prob))  # Clamp to reasonable range
 
-        # Scale by confidence
-        confidence_factor = signal_confidence * self.params.confidence_scale
-        size *= confidence_factor
+        # Calculate Kelly-optimal size
+        size = self._kelly_size(
+            win_prob=estimated_win_prob,
+            entry_price=entry_price,
+            bankroll=bankroll
+        )
 
-        # Kelly criterion adjustment
-        if expected_value > 0:
-            kelly_size = self._kelly_size(expected_value, signal_confidence)
-            size = min(size, kelly_size * self.params.kelly_fraction)
+        # If Kelly returns 0 (no edge), use minimum size scaled by confidence
+        if size <= 0:
+            size = self.params.min_size * signal_confidence
 
         # Liquidity adjustment
         size *= liquidity_score
@@ -85,22 +95,60 @@ class PositionSizer:
 
         return int(size)
 
-    def _kelly_size(self, ev: float, win_prob: float) -> float:
+    def _kelly_size(
+        self,
+        win_prob: float,
+        entry_price: float,
+        bankroll: Optional[float] = None
+    ) -> float:
         """
-        Calculate Kelly criterion size.
+        Calculate Kelly criterion size for binary options.
 
-        Kelly = (bp - q) / b
-        where b = odds, p = win prob, q = 1-p
+        For a binary option bought at price `entry_price`:
+        - Win payout: 1 - entry_price (profit per contract)
+        - Loss amount: entry_price (cost per contract)
+        - Odds b = (1 - entry_price) / entry_price
 
-        For binary options, simplified to:
-        Kelly = 2p - 1 (when odds are even)
+        Kelly formula: f* = (b * p - q) / b
+        where b = odds, p = win probability, q = 1 - p
+
+        Args:
+            win_prob: Estimated probability of winning (0-1)
+            entry_price: Price paid per contract (0-1)
+            bankroll: Total bankroll (defaults to base_size * 10)
+
+        Returns:
+            Suggested position size in dollars
         """
-        # Adjust win probability for EV
-        # This is simplified - full Kelly would use actual odds
-        implied_edge = ev / (1 - win_prob) if win_prob < 1 else 0
+        if bankroll is None:
+            bankroll = self.params.base_size * 10
 
-        kelly = implied_edge * self.params.base_size * 10
-        return max(0, kelly)
+        # Validate inputs
+        if win_prob <= 0 or win_prob >= 1:
+            return 0
+        if entry_price <= 0 or entry_price >= 1:
+            return 0
+
+        # Calculate odds: profit / risk
+        # Buying at entry_price: win gives (1 - entry_price), lose costs entry_price
+        b = (1 - entry_price) / entry_price
+        p = win_prob
+        q = 1 - p
+
+        # Kelly fraction: f* = (bp - q) / b
+        kelly_fraction = (b * p - q) / b
+
+        # Only bet if we have positive edge
+        if kelly_fraction <= 0:
+            return 0
+
+        # Apply fractional Kelly for risk management
+        adjusted_fraction = kelly_fraction * self.params.kelly_fraction
+
+        # Convert fraction to dollar size
+        kelly_dollars = bankroll * adjusted_fraction
+
+        return max(0, kelly_dollars)
 
     def _time_adjustment(self, seconds: int) -> float:
         """

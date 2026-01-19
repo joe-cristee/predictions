@@ -5,6 +5,22 @@ from kalshi.models import MarketSnapshot, Trade
 from features.registry import register_feature
 
 
+def _get_trade_metrics(ticker: str) -> Optional[dict[str, float]]:
+    """
+    Get trade metrics from the trade history pipeline if available.
+
+    Returns None if pipeline is not initialized or no data exists.
+    """
+    try:
+        from ingestion.trade_history import get_trade_pipeline
+        pipeline = get_trade_pipeline()
+        if pipeline is None:
+            return None
+        return pipeline.compute_trade_metrics(ticker, window_minutes=60)
+    except ImportError:
+        return None
+
+
 @register_feature(
     name="trade_flow_imbalance",
     category="microstructure",
@@ -12,16 +28,21 @@ from features.registry import register_feature
 )
 def compute_trade_flow_imbalance(snapshot: MarketSnapshot) -> float:
     """
-    Compute trade flow imbalance proxy from order book depth.
+    Compute trade flow imbalance from actual trade history.
 
-    Without trade history, we use depth imbalance as a proxy.
-    Positive = more bid depth (buying pressure)
-    Negative = more ask depth (selling pressure)
+    Uses real trade data when available, falls back to depth imbalance proxy.
+    Positive = net buying pressure
+    Negative = net selling pressure
 
     Returns:
         Imbalance ratio in range [-1, 1]
     """
-    # Use depth imbalance as proxy for flow imbalance
+    # Try to get actual trade data first
+    metrics = _get_trade_metrics(snapshot.market_id)
+    if metrics and "trade_flow_imbalance" in metrics:
+        return metrics["trade_flow_imbalance"]
+
+    # Fall back to depth imbalance as proxy
     return snapshot.depth_imbalance
 
 
@@ -32,23 +53,24 @@ def compute_trade_flow_imbalance(snapshot: MarketSnapshot) -> float:
 )
 def compute_trade_clustering(snapshot: MarketSnapshot) -> float:
     """
-    Compute trade clustering score proxy.
+    Compute trade clustering score from actual trade history.
 
-    Without trade history, we estimate from volume patterns.
-    Higher volume in short windows suggests clustering.
+    Uses real trade data when available, falls back to volume-based proxy.
+    High clustering suggests informed trading.
 
     Returns:
         Clustering score (0-1, higher = more clustered)
     """
-    # Without trade history, use volume concentration as proxy
-    # If 1-minute volume is high relative to 5-minute, trades are clustered
+    # Try to get actual trade data first
+    metrics = _get_trade_metrics(snapshot.market_id)
+    if metrics and "trade_clustering" in metrics:
+        return metrics["trade_clustering"]
+
+    # Fall back to volume concentration as proxy
     if snapshot.volume_5m == 0:
         return 0.0
-    
-    # Ratio of 1m to 5m volume (expected ~0.2 if uniform)
+
     volume_ratio = snapshot.volume_1m / snapshot.volume_5m
-    
-    # If ratio > 0.4, trades are more clustered in recent minute
     clustering = min(1.0, volume_ratio * 2.5)
     return clustering
 
@@ -60,21 +82,71 @@ def compute_trade_clustering(snapshot: MarketSnapshot) -> float:
 )
 def compute_large_trade_ratio(snapshot: MarketSnapshot) -> float:
     """
-    Compute large trade ratio proxy.
+    Compute large trade ratio from actual trade history.
 
-    Without trade history, use last_trade_size if available.
+    Uses real trade data when available, falls back to last_trade_size proxy.
 
     Returns:
         Ratio in range [0, 1]
     """
+    # Try to get actual trade data first
+    metrics = _get_trade_metrics(snapshot.market_id)
+    if metrics and "large_trade_ratio" in metrics:
+        return metrics["large_trade_ratio"]
+
+    # Fall back to last_trade_size proxy
     if snapshot.last_trade_size is None:
         return 0.0
-    
-    # If last trade was large (>50 contracts), signal high ratio
+
     large_threshold = 50
     if snapshot.last_trade_size >= large_threshold:
         return min(1.0, snapshot.last_trade_size / 100)
     return 0.0
+
+
+@register_feature(
+    name="price_velocity",
+    category="microstructure",
+    description="Rate of price change (cents per minute)"
+)
+def compute_price_velocity(snapshot: MarketSnapshot) -> float:
+    """
+    Compute price velocity from actual trade history.
+
+    Uses real trade data when available.
+
+    Returns:
+        Price velocity in cents per minute
+    """
+    # Try to get actual trade data first
+    metrics = _get_trade_metrics(snapshot.market_id)
+    if metrics and "price_velocity" in metrics:
+        return metrics["price_velocity"]
+
+    # No proxy available without trade history
+    return 0.0
+
+
+@register_feature(
+    name="volume_rate",
+    category="microstructure",
+    description="Trade rate (trades per minute)"
+)
+def compute_volume_rate(snapshot: MarketSnapshot) -> float:
+    """
+    Compute volume/trade rate from actual trade history.
+
+    Returns:
+        Trades per minute
+    """
+    # Try to get actual trade data first
+    metrics = _get_trade_metrics(snapshot.market_id)
+    if metrics and "volume_rate" in metrics:
+        return metrics["volume_rate"]
+
+    # Estimate from snapshot volume data
+    # volume_1m gives us a rough trades-per-minute estimate
+    return float(snapshot.volume_1m) if snapshot.volume_1m else 0.0
 
 
 # Helper functions that require trade history (not registered as features)

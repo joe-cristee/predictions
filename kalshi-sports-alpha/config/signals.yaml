@@ -41,8 +41,9 @@ signals:
 # Aggregation settings
 aggregation:
   method: "weighted_linear"  # weighted_linear, logistic, max
-  min_signals: 1
-  require_agreement: false  # Require multiple signals to agree
+  min_signals: 2  # Require at least 2 signals to reduce false positives
+  require_agreement: true  # Require multiple signals to agree on direction
+  min_agreement_ratio: 0.6  # At least 60% of signals must agree
 
 # Filtering
 filters:

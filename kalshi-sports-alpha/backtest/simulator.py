@@ -6,7 +6,7 @@ from typing import Optional, Generator
 import logging
 
 from strategy.ranker import Recommendation
-from .fills import FillModel, Fill
+from .fills import FillModel, Fill, seed_random, reset_random
 from .metrics import BacktestMetrics
 
 
@@ -23,6 +23,8 @@ class BacktestConfig:
     max_position_pct: float = 0.05  # Max 5% per position
     include_fees: bool = True
     fee_per_contract: float = 0.01  # $0.01 per contract
+    random_seed: Optional[int] = 42  # Seed for deterministic results (None = non-deterministic)
+    enable_lookahead_protection: bool = True  # Prevent look-ahead bias
 
 
 @dataclass
@@ -109,35 +111,97 @@ class BacktestSimulator:
             f"to {self.config.end_date}"
         )
 
+        # Seed random for deterministic results
+        if self.config.random_seed is not None:
+            seed_random(self.config.random_seed)
+            logger.info(f"Seeded random with {self.config.random_seed} for deterministic backtest")
+
         equity_curve = []
+        last_timestamp = None
 
-        for snapshot in historical_data:
-            timestamp = snapshot.get("timestamp")
+        try:
+            for snapshot in historical_data:
+                timestamp = snapshot.get("timestamp")
 
-            # Skip if outside date range
-            if timestamp < self.config.start_date:
-                continue
-            if timestamp > self.config.end_date:
-                break
+                # Look-ahead bias protection: ensure data is in chronological order
+                if self.config.enable_lookahead_protection:
+                    if last_timestamp is not None and timestamp < last_timestamp:
+                        raise ValueError(
+                            f"Look-ahead bias detected: snapshot at {timestamp} "
+                            f"is before previous snapshot at {last_timestamp}. "
+                            "Data must be in chronological order."
+                        )
+                    last_timestamp = timestamp
 
-            # Check for position exits (settlements)
-            self._check_settlements(snapshot)
+                # Skip if outside date range
+                if timestamp < self.config.start_date:
+                    continue
+                if timestamp > self.config.end_date:
+                    break
 
-            # Generate signals
-            signals = self._generate_signals(snapshot, signal_generators)
+                # Look-ahead protection: filter snapshot to only include point-in-time data
+                if self.config.enable_lookahead_protection:
+                    snapshot = self._filter_point_in_time_data(snapshot, timestamp)
 
-            # Execute trades
-            for signal in signals:
-                self._execute_signal(signal, snapshot)
+                # Check for position exits (settlements)
+                self._check_settlements(snapshot)
 
-            # Record equity
-            equity_curve.append({
-                "timestamp": timestamp,
-                "equity": self.state.equity,
-            })
+                # Generate signals
+                signals = self._generate_signals(snapshot, signal_generators)
+
+                # Execute trades
+                for signal in signals:
+                    self._execute_signal(signal, snapshot)
+
+                # Record equity
+                equity_curve.append({
+                    "timestamp": timestamp,
+                    "equity": self.state.equity,
+                })
+
+        finally:
+            # Reset random state after backtest
+            if self.config.random_seed is not None:
+                reset_random()
 
         # Calculate final metrics
         return self._calculate_metrics(equity_curve)
+
+    def _filter_point_in_time_data(self, snapshot: dict, current_time: datetime) -> dict:
+        """
+        Filter snapshot to only include data available at the given time.
+
+        This prevents look-ahead bias by removing any future-dated information.
+
+        Args:
+            snapshot: Raw snapshot data
+            current_time: Current simulation time
+
+        Returns:
+            Filtered snapshot with only point-in-time data
+        """
+        filtered = snapshot.copy()
+
+        # Remove any settlement results that haven't occurred yet
+        if "settled_markets" in filtered:
+            settled = filtered["settled_markets"]
+            if isinstance(settled, dict):
+                # Only include settlements that occurred before current_time
+                filtered["settled_markets"] = {
+                    k: v for k, v in settled.items()
+                    if snapshot.get("settlement_times", {}).get(k, current_time) <= current_time
+                }
+
+        # Remove any future price information
+        if "future_price" in filtered:
+            del filtered["future_price"]
+
+        # Remove result/outcome fields that shouldn't be known yet
+        for forbidden_field in ["result", "outcome", "winner", "final_score"]:
+            if forbidden_field in filtered:
+                del filtered[forbidden_field]
+
+        return filtered
 
     def _generate_signals(self, snapshot: dict, generators: list) -> list:
         """Generate signals from snapshot."""

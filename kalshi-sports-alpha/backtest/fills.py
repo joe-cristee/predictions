@@ -5,6 +5,37 @@ from typing import Optional
 import random
 
 
+# Global random state for deterministic backtests
+_rng: Optional[random.Random] = None
+
+
+def get_rng() -> random.Random:
+    """Get the random number generator (creates one if not seeded)."""
+    global _rng
+    if _rng is None:
+        _rng = random.Random()
+    return _rng
+
+
+def seed_random(seed: int) -> None:
+    """
+    Seed the random number generator for deterministic backtests.
+
+    Call this before running a backtest to ensure reproducible results.
+
+    Args:
+        seed: Random seed value
+    """
+    global _rng
+    _rng = random.Random(seed)
+
+
+def reset_random() -> None:
+    """Reset the random number generator to unseeded state."""
+    global _rng
+    _rng = None
+
+
 @dataclass
 class Fill:
     """Represents a trade fill."""
@@ -113,13 +144,14 @@ class FillModel:
         if size <= 0 or depth <= 0:
             return None
 
-        # Determine filled size
+        # Determine filled size (use seeded RNG for deterministic backtests)
+        rng = get_rng()
         if size > depth:
             # Can only fill available depth
             filled_size = depth
-        elif random.random() < self.partial_fill_prob:
-            # Random partial fill
-            fill_pct = random.uniform(self.min_fill_pct, 1.0)
+        elif rng.random() < self.partial_fill_prob:
+            # Random partial fill (deterministic with seeded RNG)
+            fill_pct = rng.uniform(self.min_fill_pct, 1.0)
             filled_size = int(size * fill_pct)
         else:
             filled_size = size
