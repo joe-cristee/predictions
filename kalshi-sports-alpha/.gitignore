@@ -1,7 +1,6 @@
 # Credentials & Secrets
 .env
 *.pem
-ksa-test.pem
 
 # Python
 __pycache__/
