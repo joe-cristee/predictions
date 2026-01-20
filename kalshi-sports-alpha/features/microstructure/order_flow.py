@@ -149,6 +149,46 @@ def compute_volume_rate(snapshot: MarketSnapshot) -> float:
     return float(snapshot.volume_1m) if snapshot.volume_1m else 0.0
 
 
+@register_feature(
+    name="trade_size_zscore",
+    category="microstructure",
+    description="Z-score of last trade size relative to recent average"
+)
+def compute_trade_size_zscore_feature(snapshot: MarketSnapshot) -> float:
+    """
+    Compute z-score of last trade size relative to recent trades.
+
+    Uses trade history pipeline when available, falls back to volume-based proxy.
+    High z-score indicates unusually large trade (potentially informed).
+
+    Returns:
+        Z-score (0 if insufficient data, positive = larger than average)
+    """
+    # Try to get actual trade data first
+    metrics = _get_trade_metrics(snapshot.market_id)
+    if metrics and "trade_size_zscore" in metrics:
+        return metrics["trade_size_zscore"]
+
+    # Fall back to proxy using last_trade_size vs average
+    if snapshot.last_trade_size is None:
+        return 0.0
+
+    # Estimate average trade size from total volume
+    # Assume ~20 trades per hour as baseline
+    if snapshot.volume_1h > 0:
+        estimated_trade_count = max(20, snapshot.volume_1h / 10)  # Rough estimate
+        avg_trade_size = snapshot.volume_1h / estimated_trade_count
+
+        if avg_trade_size > 0:
+            # Assume standard deviation is roughly 50% of mean for trade sizes
+            estimated_std = avg_trade_size * 0.5
+            if estimated_std > 0:
+                zscore = (snapshot.last_trade_size - avg_trade_size) / estimated_std
+                return max(-3.0, min(3.0, zscore))  # Clamp to reasonable range
+
+    return 0.0
+
+
 # Helper functions that require trade history (not registered as features)
 def compute_trade_flow_imbalance_from_trades(
     trades: Optional[list[Trade]] = None
