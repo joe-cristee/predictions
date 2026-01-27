@@ -5,7 +5,7 @@ from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import padding
 
 # --- CONFIG ---
-TARGET_DATE = "26JAN15"
+TARGET_DATE = "26JAN18"
 LOOKBACK_HOURS = 240
 
 load_dotenv()
